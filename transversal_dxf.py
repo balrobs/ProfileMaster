@@ -140,77 +140,54 @@ def _sample_transversal(cx, cy, ux, uy, dist_left, dist_right, sample_step, samp
 
     return points
 
+def _is_valid_z(z):
+    """Indica si z es una cota válida, finita y utilizable."""
+    if z is None:
+        return False
+    try:
+        return math.isfinite(float(z))
+    except (TypeError, ValueError):
+        return False
 
 def _interpolate_z_transversal(pts):
     """
-    Interpola Z faltantes en una lista de (dist, z, x, y).
-    Devuelve lista con los mismos elementos pero z nunca None.
+    No interpola ni extrapola valores Z.
+
+    Los valores None, NaN e infinitos se mantienen como None para
+    representar zonas sin datos válidos del MDT.
+
+    Se mantiene el nombre de la función para evitar cambios
+    innecesarios en el resto del código.
     """
-    result = list(pts)
-    n = len(result)
-    if n == 0:
-        return result
+    result = []
 
-    # Buscar primer y último válido
-    first_v = next((i for i in range(n) if result[i][1] is not None), None)
-    last_v = next((i for i in range(n - 1, -1, -1) if result[i][1] is not None), None)
+    for d, z, x, y in pts:
+        if _is_valid_z(z):
+            result.append((d, float(z), x, y))
+        else:
+            result.append((d, None, x, y))
 
-    if first_v is None:
-        # Sin ningún valor → z = 0
-        result = [(d, 0.0, x, y) for d, z, x, y in result]
-        return result
-
-    # Rellenar extremos
-    for i in range(first_v):
-        d, _, x, y = result[i]
-        result[i] = (d, result[first_v][1], x, y)
-    for i in range(last_v + 1, n):
-        d, _, x, y = result[i]
-        result[i] = (d, result[last_v][1], x, y)
-
-    # Interpolar intermedios
-    i = 0
-    while i < n:
-        if result[i][1] is None:
-            j = i + 1
-            while j < n and result[j][1] is None:
-                j += 1
-            if j < n:
-                z0 = result[i - 1][1]
-                z1 = result[j][1]
-                d0 = result[i - 1][0]
-                d1 = result[j][0]
-                for k in range(i, j):
-                    t = (result[k][0] - d0) / (d1 - d0) if d1 != d0 else 0.0
-                    zk = z0 + t * (z1 - z0)
-                    result[k] = (result[k][0], zk, result[k][2], result[k][3])
-        i += 1
     return result
 
 
 def _interp_at_offset(pts, d_target):
     """
-    Interpola la cota Z en una distancia concreta 'd_target' (con signo,
-    negativa = izquierda) a partir de la lista de puntos muestreados
-    [(dist, z, x, y), ...] ya con Z interpolada (sin None).
-    Si 'd_target' cae fuera del rango muestreado, devuelve el extremo
-    más cercano.
+    Devuelve el valor Z del punto muestreado en d_target.
+
+    No interpola ni extrapola.
+    Si el punto solicitado tiene NoData, NaN o infinito,
+    devuelve None.
     """
     if not pts:
         return None
-    if d_target <= pts[0][0]:
-        return pts[0][1]
-    if d_target >= pts[-1][0]:
-        return pts[-1][1]
-    for i in range(1, len(pts)):
-        d0, z0 = pts[i - 1][0], pts[i - 1][1]
-        d1, z1 = pts[i][0], pts[i][1]
-        if d0 <= d_target <= d1:
-            if d1 == d0:
-                return z0
-            t = (d_target - d0) / (d1 - d0)
-            return z0 + t * (z1 - z0)
-    return pts[-1][1]
+
+    for d, z, _, _ in pts:
+        if abs(d - d_target) < 1e-6:
+            if _is_valid_z(z):
+                return float(z)
+            return None
+
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -400,27 +377,44 @@ def export_transversales_dxf(
             continue
 
         # ── Plano de comparación ─────────────────────────────────────────────
-        zs = [z for _, z, _, _ in pts if z is not None]
+        zs = [
+            float(z)
+            for _, z, _, _ in pts
+            if _is_valid_z(z)
+        ]
         if not zs:
             continue
 
         # Cota del eje en esta sección (punto donde dist == 0)
-        z_axis_val = next((z for d, z, _, _ in pts if abs(d) < 1e-3), None)
-        if z_axis_val is None:
-            z_axis_val = min(zs)
+        z_axis_val = next(
+            (
+                float(z)
+                for d, z, _, _ in pts
+                if abs(d) < 1e-3 and _is_valid_z(z)
+            ),
+            None
+        )
+        if z_axis_val is not None:
+            z_axis_val = float(z_axis_val)
 
         z_min_section = min(zs)
         z_max = max(zs)
 
-        if comparison_plane is None:
-            # Automático: redondeado a 0.5 m por debajo del punto más bajo
-            # de ESTA sección, con un margen pequeño y fijo. Antes se usaba
-            # un múltiplo de 5 por debajo de la cota del eje, lo que dejaba
-            # un hueco enorme entre el plano y el terreno cuando la sección
-            # apenas variaba unos decímetros.
-            z_ref = math.floor((z_min_section - _AUTO_PLANE_MARGIN) * 2) / 2.0
+        # El plano de comparación debe ser un valor numérico válido.
+        # Los valores NoData/NaN del perfil transversal no deben interrumpir la generación del DXF.
+        if comparison_plane is not None:
+            try:
+                z_ref = float(comparison_plane)
+                if not math.isfinite(z_ref):
+                    raise ValueError
+            except (TypeError, ValueError):
+                z_ref = math.floor(
+                    (z_min_section - _AUTO_PLANE_MARGIN) * 2
+                ) / 2.0
         else:
-            z_ref = comparison_plane
+            z_ref = math.floor(
+                (z_min_section - _AUTO_PLANE_MARGIN) * 2
+            ) / 2.0
 
         # ── Altura de la zona de terreno (en papel) ─────────────────────────
         z_range = max(z_max - z_ref, 0.5)
@@ -469,16 +463,42 @@ def export_transversales_dxf(
         )
 
         # ── Línea de terreno ─────────────────────────────────────────────────
-        terrain_paper = []
-        for d, z, _, _ in pts:
-            px = ox + _paper_x(dist_left + d, h_scale)
-            py = y_base + _paper_y(z, z_ref, v_scale_local)
-            terrain_paper.append((px, py))
+        # Los valores None/NaN representan zonas sin datos del MDT.
+        # Cada tramo continuo de valores válidos se dibuja como una
+        # polilínea independiente.
+        # No se interpola ni se conecta a través de zonas NoData.
 
-        if len(terrain_paper) >= 2:
+        terrain_segment = []
+
+        for d, z, _, _ in pts:
+            if not _is_valid_z(z):
+                if len(terrain_segment) >= 2:
+                    msp.add_lwpolyline(
+                        terrain_segment,
+                        dxfattribs={
+                            'layer': 'TRANS_TERRENO',
+                            'lineweight': 35
+                        }
+                    )
+                terrain_segment = []
+                continue
+
+            px = ox + _paper_x(dist_left + d, h_scale)
+            py = y_base + _paper_y(
+                float(z),
+                z_ref,
+                v_scale_local
+            )
+            terrain_segment.append((px, py))
+
+        # Último segmento
+        if len(terrain_segment) >= 2:
             msp.add_lwpolyline(
-                terrain_paper,
-                dxfattribs={'layer': 'TRANS_TERRENO', 'lineweight': 35}
+                terrain_segment,
+                dxfattribs={
+                    'layer': 'TRANS_TERRENO',
+                    'lineweight': 35
+                }
             )
 
         # ── Cabecera de la mini-guitarra: número de transversal + PK ────────

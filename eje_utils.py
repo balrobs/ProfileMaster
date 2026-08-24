@@ -523,9 +523,16 @@ class MDTSampler:
                 data = band.ReadAsArray(c, r, 1, 1)
                 if data is None:
                     return None
+
                 v = float(data[0][0])
+
+                # None, NaN e infinitos se consideran valores NoData.
+                if not math.isfinite(v):
+                    return None
+
                 if nodata is not None and abs(v - nodata) < 1e-3:
                     return None
+
                 return v
 
             z00 = _read(col0, row0)
@@ -538,16 +545,10 @@ class MDTSampler:
                 z = (z00 * (1 - tc) * (1 - tr) + z10 * tc * (1 - tr) + z01 * (1 - tc) * tr + z11 * tc * tr)
                 return z
 
-            # Algún vecino es NoData → bilineal sólo con los válidos
-            pairs = [(z00, (1 - tc) * (1 - tr)), (z10, tc * (1 - tr)),
-                     (z01, (1 - tc) * tr), (z11, tc * tr)]
-            valid = [(v, w) for v, w in pairs if v is not None]
-            if not valid:
+            # Si algún vecino es NoData, no se interpola.
+            # La posición se considera sin datos válidos.
+            if not all(z is not None for z in (z00, z10, z01, z11)):
                 continue
-            total_w = sum(w for _, w in valid)
-            if total_w < 1e-9:
-                continue
-            return sum(v * w for v, w in valid) / total_w
 
         return None
 

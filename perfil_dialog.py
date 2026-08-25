@@ -826,6 +826,7 @@ class ProfileWorker(QThread):
             interval = p['interval']
             h_scale = p['h_scale']
             v_scale = p['v_scale']
+            language = str(p.get('language', 'es')).strip().lower()
             comp_plane_value = p['comparison_plane']       # None = automático por eje
             trans_comp_value = p.get('trans_comparison_plane', None)  # None = relativo por sección
             output_dir = p['output_dir']
@@ -834,6 +835,7 @@ class ProfileWorker(QThread):
             text_vertical = p.get('text_vertical', True)
             gen_eje3d_eq = p.get('gen_eje3d_equidistante', False)
             eq_int = p.get('eje3d_equidistancia', 1.0)
+            pc_label = {'es': 'PC', 'en': 'CP', 'de': 'VE'}.get(language, 'PC')
 
             # ── 1. Caché MDTs ─────────────────────────────────────────────
             self.progress.emit(5, "Cargando caché de MDTs...")
@@ -919,6 +921,7 @@ class ProfileWorker(QThread):
                             comparison_plane=trans_comp_value,
                             guitarra_interval=p.get('trans_guitarra_interval', 5.0),
                             progress_callback=_trans_p,
+                            language=language,
                         )
                     except Exception as e_t:
                         self.progress.emit(pct_end - 2,
@@ -948,11 +951,12 @@ class ProfileWorker(QThread):
                         title=(
                             f"{eje_label} - "
                             f"{self._sanitize_dxf_text(os.path.splitext(os.path.basename(axis_path))[0])}  "
-                            f"[PC={comp_plane_final:.2f} m  H1:{h_scale}  V1:{v_scale}]"
+                            f"[{pc_label}={comp_plane_final:.2f} m  H1:{h_scale}  V1:{v_scale}]"
                         ),
                         text_vertical=text_vertical,
                         use_equidistant=p.get('use_equidistant', False),
                         equidistant_interval=p.get('equidistant_interval', 100.0),
+                        language=language,
                     )
                 except PermissionError:
                     raise PermissionError(
@@ -1007,6 +1011,7 @@ class ProfileWorker(QThread):
                         all_axes_3d, output_dxf3d,
                         equidistant_interval=eq_int,
                         sampler=eje3d_sampler,
+                            language=language,
                     )
                 except PermissionError:
                     raise PermissionError(
@@ -1027,6 +1032,7 @@ class ProfileWorker(QThread):
                             equidistant_interval=seg_int,
                             sampler=eje3d_sampler,
                             clean_equidistant=True,
+                            language=language,
                         )
                     except PermissionError:
                         raise PermissionError(
@@ -1928,7 +1934,7 @@ class PerfilLongitudinalDialog(QDialog):
         if not language or language == self._lang:
             return
 
-        self._lang = language
+        self._lang = str(language).strip().lower()
         self._settings.setValue("PerfilLongitudinalMDT/lang", self._lang)
         self.strings = _STRINGS[self._lang]
 
@@ -2185,6 +2191,7 @@ class PerfilLongitudinalDialog(QDialog):
             'interval': self.sp_interval.value(),
             'h_scale': self.sp_hscale.value(),
             'v_scale': self.sp_vscale.value(),
+            'language': str(self._lang).strip().lower(),
             'comparison_plane': cp,
             'text_vertical': self.chk_text_vertical.isChecked(),
             'use_equidistant': self.chk_use_equidistant.isChecked(),

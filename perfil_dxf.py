@@ -45,6 +45,20 @@ _GRID_LBL_X = -4.0
 _LABEL_X = -30.0
 _OVERLAP_TOL = 1.5
 
+_DXF_LABELS = {
+    'es': dict(pc='PC', min='MIN', max='MAX', vertex='Vértice', elevation='Cota (m)',
+               partial='Dist.Parcial (PK)', total='Dist.Total (PK)', scale='Escala'),
+    'en': dict(pc='CP', min='MIN', max='MAX', vertex='Vertex', elevation='Elevation (m)',
+               partial='Partial dist. (chainage)', total='Total dist. (chainage)', scale='Scale'),
+    'de': dict(pc='VE', min='MIN', max='MAX', vertex='Knoten', elevation='Höhe (m)',
+               partial='Teilstr. (Station)', total='Gesamtstr. (Station)', scale='Maßstab'),
+}
+
+
+def _dxf_labels(language):
+    language = str(language or 'es').strip().lower()
+    return _DXF_LABELS.get(language, _DXF_LABELS['es'])
+
 
 def _find_qgis_python():
     """
@@ -169,8 +183,10 @@ def export_profile_dxf(
     text_vertical=True,
     use_equidistant=False,
     equidistant_interval=100.0,
+    language='es',
 ):
     _ensure_ezdxf()
+    labels = _dxf_labels(language)
 
     TABLE_TOP, TABLE_H1, TABLE_H2, TABLE_H3, TABLE_BOT = _table_rows(
         text_vertical)
@@ -226,7 +242,7 @@ def export_profile_dxf(
     # ── 2. Plano de comparación ─────────────────────────────────────────────
     msp.add_line((0.0, 0.0), (x_max, 0.0),
                  dxfattribs={'layer': 'PLANO_COMP', 'lineweight': _LW_PLANE})
-    _add_text(msp, f'PC={comparison_plane:.2f} m',
+    _add_text(msp, f"{labels['pc']}={comparison_plane:.2f} m",
               (x_max + 5.0, 0.0), _TEA.MIDDLE_LEFT, _TXT_PC, 'PLANO_COMP')
 
     # ── 3. Grid de cotas ────────────────────────────────────────────────────
@@ -296,7 +312,7 @@ def export_profile_dxf(
                          dxfattribs={'layer': 'MINMAX', 'lineweight': _LW_TICK})
             tx = _minmax_x(pxm)
             # MIN cuelga hacia abajo desde el punto (mínimo = punto más bajo)
-            _add_text(msp, f'MIN:{z_min_all:.3f}',
+            _add_text(msp, f"{labels['min']}:{z_min_all:.3f}",
                       (tx, pym - _TICK_HALF - _cota_offset), _TEA.TOP_CENTER,
                       _TXT_COTA, 'MINMAX', rotation=90.0)
             break
@@ -313,7 +329,7 @@ def export_profile_dxf(
             # MAX sube por encima del texto de cota del vértice
             _add_text(
                 msp,
-                f'MAX:{z_max_all:.3f}',
+                f"{labels['max']}:{z_max_all:.3f}",
                 (tx, pym + _TICK_HALF + _minmax_v_offset),
                 _TEA.BOTTOM_CENTER,
                 _TXT_COTA,
@@ -440,10 +456,10 @@ def export_profile_dxf(
 
     # ── 10. Etiquetas de fila — siempre horizontales ────────────────────────
     for y_mid, label in [
-        (y_vert_num, 'Vértice'),
-        (y_cota, 'Cota (m)'),
-        (y_par, 'Dist.Parcial (PK)'),
-        (y_tot, 'Dist.Total (PK)'),
+        (y_vert_num, labels['vertex']),
+        (y_cota, labels['elevation']),
+        (y_par, labels['partial']),
+        (y_tot, labels['total']),
     ]:
         _add_text(msp, label,
                   (_LABEL_X, y_mid), _TEA.MIDDLE_RIGHT,
@@ -453,7 +469,7 @@ def export_profile_dxf(
     y_title = _py(z_max_v, comparison_plane, v_scale) + 20.0
     _add_text(msp, title,
               (x_max / 2, y_title), _TEA.BOTTOM_CENTER, _TXT_TITLE, 'TITULO')
-    _add_text(msp, f'Escala  H 1:{h_scale}   V 1:{v_scale}',
+    _add_text(msp, f"{labels['scale']}  H 1:{h_scale}   V 1:{v_scale}",
               (x_max, y_title - 6.0), _TEA.BOTTOM_RIGHT, _TXT_PC, 'TITULO')
 
     doc.saveas(output_path)

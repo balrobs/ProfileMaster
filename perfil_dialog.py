@@ -21,7 +21,7 @@ from qgis.PyQt.QtWidgets import (
     QFileDialog, QCheckBox, QMessageBox, QTabWidget, QWidget,
     QFrame, QComboBox, QRadioButton, QButtonGroup, QLayout,
 )
-from qgis.PyQt.QtCore import QThread, pyqtSignal, QUrl, QSettings
+from qgis.PyQt.QtCore import QThread, pyqtSignal, QUrl, QSettings, QTimer
 from qgis.PyQt.QtGui import QDesktopServices
 
 
@@ -309,6 +309,45 @@ _STRINGS = {
         rdo_file='Archivo',
         placeholder_axis='DXF, SHP, KML/KMZ, GeoPackage, GML, GPX, GeoJSON',
         tooltip_refresh_axis='Actualizar lista de capas vectoriales cargadas',
+        tooltip_eje3d_interval=(
+            'Equidistancia de las marcas de PK redondo en el eje 3D.\n'
+            'Ej: 100 m → marcas en 0+100, 0+200, 0+300...'),
+        tooltip_eje3d_clean=(
+            'DXF adicional con la polilínea 3D planchada sobre el MDT,\n'
+            'con un vértice cada intervalo de segmentación. Sin texto ni marcas.'),
+        tooltip_trans_spacing='Distancia entre secciones transversales a lo largo del eje.',
+        tooltip_trans_left='Metros a muestrear a la izquierda del eje.',
+        tooltip_trans_right='Metros a muestrear a la derecha del eje. Puede ser distinto al de izquierda.',
+        tooltip_trans_step='Resolución del muestreo perpendicular al eje.',
+        tooltip_trans_cplane_auto=(
+            'Cada transversal usa su propio plano: redondeado a 0.5 m por\n'
+            'debajo del punto más bajo del terreno EN ESA SECCIÓN (margen\n'
+            'pequeño y fijo, sin huecos grandes entre el plano y el terreno).'),
+        tooltip_trans_cplane_fixed='Plano fijo igual para todas las transversales.',
+        tooltip_trans_guitarra=(
+            'Se dibuja una columna en la mini-guitarra (con la cota del terreno)\n'
+            'cada esta distancia, a izquierda y derecha del eje, hasta llegar al\n'
+            'ancho configurado arriba (izquierda/derecha).\n'
+            'Ejemplos: 5 m → marca cada 5 m; 10 m → cada 10 m; 1 m → cada 1 m.\n'
+            'El propio eje (distancia 0) ya se marca aparte con un círculo y su cota.'),
+        tooltip_buffer=(
+            'Buffer cuadrado aplicado al bbox del eje.\n'
+            'Se aplica también en sentido longitudinal (inicio y fin)\n'
+            'para asegurar cobertura completa en todas las direcciones.'),
+        tooltip_curvas_maestra=(
+            'Múltiplo de la equidistancia normal para curvas maestras\n'
+            '(líneas de mayor grosor y con etiqueta de cota).'),
+        tooltip_curvas_smooth=(
+            'Iteraciones del algoritmo de suavizado Chaikin.\n'
+            '0 = sin suavizar (escalones del píxel visibles)\n'
+            '1-2 = suave (recomendado)\n'
+            '3-4 = muy suave (puede alejarse del terreno real)\n'
+            'Cada iteración duplica el número de vértices.'),
+        tooltip_curvas_min_longitud=(
+            'Longitud mínima de una curva para ser exportada.\n'
+            'Las curvas (abiertas o cerradas) más cortas se descartan,\n'
+            'evitando minicurvas antiestéticas en zonas planas o bordes.\n'
+            '0 = exportar todas sin filtro.'),
         lbl_outdir='Carpeta de salida:',
         placeholder_outdir='Carpeta donde se guardarán los archivos generados',
         no_raster_layers='(no hay capas ráster cargadas)',
@@ -465,6 +504,43 @@ _STRINGS = {
         rdo_file='File',
         placeholder_axis='DXF, SHP, KML/KMZ, GeoPackage, GML, GPX, GeoJSON',
         tooltip_refresh_axis='Refresh the list of loaded vector layers',
+        tooltip_eje3d_interval=(
+            'Spacing of round chainage marks on the 3D axis.\n'
+            'Example: 100 m → marks at 0+100, 0+200, 0+300...'),
+        tooltip_eje3d_clean=(
+            'Additional DXF with the 3D polyline draped over the DTM,\n'
+            'with one vertex per segmentation interval. No text or marks.'),
+        tooltip_trans_spacing='Distance between cross-sections along the axis.',
+        tooltip_trans_left='Meters to sample to the left of the axis.',
+        tooltip_trans_right='Meters to sample to the right of the axis. It may differ from the left.',
+        tooltip_trans_step='Sampling resolution perpendicular to the axis.',
+        tooltip_trans_cplane_auto=(
+            'Each cross-section uses its own plane: rounded to 0.5 m below\n'
+            'the lowest terrain point in THAT SECTION (small, fixed margin).'),
+        tooltip_trans_cplane_fixed='Fixed plane shared by all cross-sections.',
+        tooltip_trans_guitarra=(
+            'Draws a mini-table column with the terrain elevation at this spacing,\n'
+            'to the left and right of the axis, up to the configured width.\n'
+            'Examples: 5 m → every 5 m; 10 m → every 10 m; 1 m → every 1 m.\n'
+            'The axis itself (distance 0) is marked separately with its elevation.'),
+        tooltip_buffer=(
+            'Square buffer applied to the axis bounding box.\n'
+            'It also extends longitudinally (start and end)\n'
+            'to ensure complete coverage in every direction.'),
+        tooltip_curvas_maestra=(
+            'Multiple of the normal contour spacing for master contours\n'
+            '(thicker lines with an elevation label).'),
+        tooltip_curvas_smooth=(
+            'Iterations of the Chaikin smoothing algorithm.\n'
+            '0 = no smoothing (visible pixel steps)\n'
+            '1-2 = smooth (recommended)\n'
+            '3-4 = very smooth (may move away from the actual terrain)\n'
+            'Each iteration doubles the number of vertices.'),
+        tooltip_curvas_min_longitud=(
+            'Minimum length of a contour to export.\n'
+            'Shorter open or closed contours are discarded,\n'
+            'avoiding unattractive mini-contours in flat areas or edges.\n'
+            '0 = export all without filtering.'),
         lbl_outdir='Output folder:',
         placeholder_outdir='Folder where the generated files will be saved',
         no_raster_layers='(no raster layers loaded)',
@@ -606,6 +682,88 @@ _STRINGS = {
         result_curvas_error='⚠ Contour lines: {err}',
     ),
 }
+
+_STRINGS['de'] = dict(
+    _STRINGS['en'],
+    subtitle='Längsprofil · Querprofile · DGM-Puffer · Höhenlinien',
+    grp1_title='1. Eingabedaten', lbl_mdt='DGM:', rdo_folder='Ordner',
+    rdo_layer_loaded='Geladener Layer', lbl_axis='Achse (Vektor):', rdo_file='Datei',
+    lbl_outdir='Ausgabeordner:', placeholder_folder='Ordner mit den DGMs',
+    placeholder_outdir='Ordner für die erzeugten Dateien',
+    tooltip_refresh_mdt='Liste der geladenen Raster-Layer aktualisieren',
+    tooltip_refresh_axis='Liste der geladenen Vektor-Layer aktualisieren',
+    tooltip_eje3d_interval='Abstand der runden Stationsmarken auf der 3D-Achse.\nBeispiel: 100 m → Marken bei 0+100, 0+200, 0+300 ...',
+    tooltip_eje3d_clean='Zusätzliche DXF-Datei mit der auf das DGM gelegten 3D-Polylinie.\nEin Knoten je Segmentierungsintervall, ohne Text und Marken.',
+    tooltip_trans_spacing='Abstand zwischen den Querprofilen entlang der Achse.',
+    tooltip_trans_left='Auf der linken Seite der Achse abzutastende Meter.',
+    tooltip_trans_right='Auf der rechten Seite der Achse abzutastende Meter.',
+    tooltip_trans_step='Auflösung der Abtastung senkrecht zur Achse.',
+    tooltip_trans_cplane_auto='Jeder Querschnitt verwendet eine eigene Ebene: 0,5 m unter dem\ntiefsten Geländepunkt dieses Querschnitts.',
+    tooltip_trans_cplane_fixed='Feste Ebene für alle Querprofile.',
+    tooltip_trans_guitarra='Erzeugt in diesem Abstand eine Spalte in der Minitabelle mit der Geländehöhe\nlinks und rechts der Achse bis zur konfigurierten Breite.',
+    tooltip_buffer='Quadratischer Puffer um die Boundingbox der Achse.\nEr wird auch in Längsrichtung erweitert, um vollständige Abdeckung sicherzustellen.',
+    tooltip_curvas_maestra='Vielfaches des normalen Höhenlinienabstands für Haupthöhenlinien\n(dickere Linien mit Höhenbeschriftung).',
+    tooltip_curvas_smooth='Iterationen des Chaikin-Glättungsalgorithmus.\n0 = keine Glättung, 1–2 = glatt, 3–4 = sehr glatt.',
+    tooltip_curvas_min_longitud='Mindestlänge einer zu exportierenden Höhenlinie.\nKürzere Linien werden verworfen; 0 exportiert alle Linien.',
+    chk_rescan='DGM erneut scannen (Cache ignorieren)',
+    no_raster_layers='(keine Raster-Layer geladen)', no_line_layers='(keine Linien-Layer geladen)',
+    tab_longitudinal='📈 Längsprofil', tab_transversales='📐 Querprofile',
+    tab_buffer='🗺 DGM-Puffer', tab_curvas='〰 Höhenlinien',
+    chk_gen_longitudinal='✅  Längsprofil erzeugen', grp_longitudinal='Parameter des Längsprofils',
+    lbl_interval='Segmentierungsintervall:', lbl_hscale='Horizontaler Maßstab  1:',
+    lbl_vscale='Vertikaler Maßstab      1:', lbl_textos_guitarra='Tabellentext:',
+    chk_text_vertical='Vertikal (90°)', lbl_datos_guitarra='Tabellenzeilen:',
+    chk_use_equidistant='Mit gleichmäßigem Abstand anzeigen', lbl_intervalo_corto='Intervall:',
+    lbl_plano_comparacion='Bezugsebene:', chk_automatico='Automatisch',
+    lbl_cp_info='ℹ  Automatisch: Vielfaches von 5 unter dem Geländeminimum − 5 m',
+    lbl_marcas_pk='Kilometermarken (Abstand):',
+    chk_gen_eje3d_eq='Zusätzlich eine saubere 3D-Achse erzeugen (ohne Marken und Text)',
+    chk_gen_transversales='✅  Querprofile erzeugen', grp_trans='Parameter der Querprofile',
+    lbl_trans_spacing='Abstand zwischen Querprofilen:', lbl_trans_left='Breite links:',
+    lbl_trans_right='Breite rechts:', lbl_trans_step='Abtastschritt Querprofil:',
+    sep_escalas_trans='── DXF-Maßstäbe der Querprofile ─────────────────────────',
+    lbl_trans_info='Ausgabe: <profil>_transversales.dxf — Querschnittsraster mit\nGelände, Achse, Stationierung, Vergleichsebene und Höhentabelle.',
+    sep_plano_comparacion='── Vergleichsebene ─────────────────────────────────────',
+    lbl_plano_por_seccion='Ebene je Querschnitt:', lbl_equidist_guitarra='Tabellenabstand:',
+    chk_trans_cplane_auto='Relativ (0,5 m unter dem Minimum jedes Querschnitts)',
+    sep_mini_guitarra='── Minitabelle jedes Querprofils ────────────────────────',
+    chk_gen_mdt_buffer='✅  DGM mit Puffer exportieren (GeoTIFF)',
+    grp_mdt_buf='Parameter des DGM-Puffers', lbl_buffer_todas='Puffer (alle Richtungen):',
+    lbl_buf_info='GeoTIFF auf die Boundingbox der Achse + Puffer zugeschnitten,\nalle DGM-Kacheln werden zu einem komprimierten Raster zusammengeführt (LZW).',
+    chk_gen_curvas='✅  Höhenlinien erzeugen (DXF)', grp_curvas='Parameter der Höhenlinien',
+    lbl_curvas_eq='Abstand normale Höhenlinien:', lbl_curvas_maestra='Abstand Haupthöhenlinien:',
+    lbl_curvas_smooth='Glättung (Chaikin-Iterationen):',
+    lbl_curvas_min_longitud='Minimale Linienlänge (m):',
+    chk_curvas_simplify='Knoten in geraden Abschnitten reduzieren (vereinfachen)',
+    lbl_curvas_simplify_tol='Toleranz der Vereinfachung:',
+    chk_curvas_simplify_tooltip='Vereinfacht gerade Abschnitte vor der Glättung und reduziert dadurch die Dateigröße.',
+    sp_curvas_simplify_tol_tooltip='Maximale Abweichung eines entfernten Knotens von der ursprünglichen Linie.',
+    lbl_buf_req='⚠  DGM-Puffer erforderlich. Falls noch keiner erzeugt wurde, wird er automatisch erzeugt.',
+    lbl_curvas_out='Ausgabe: curvas_nivel.dxf — Layer CURVAS_NORMALES, CURVAS_MAESTRAS und CURVAS_TEXTOS.',
+    status_ready='Bereit.', btn_run='▶  Erzeugen', btn_donate='☕  Auf einen Kaffee einladen',
+    btn_donate_tooltip='Wenn dieses Plugin nützlich ist, unterstütze seine Entwicklung.',
+    btn_close='Schließen', dlg_select_mdt_folder='DGM-Ordner auswählen',
+    dlg_select_axis_file='Achsendatei auswählen', dlg_select_outdir='Ausgabeordner auswählen',
+    warn_missing_title='Fehlende Angabe', warn_no_folder='Gib den DGM-Ordner an.',
+    warn_no_raster_layer='In QGIS ist kein Raster-Layer (DGM) geladen.\nLade das DGM ins Projekt oder verwende den Modus „Ordner“.',
+    warn_invalid_folder_title='Ungültiger Ordner', warn_folder_not_exist='Der DGM-Ordner existiert nicht:\n{path}',
+    warn_no_axis='Gib die Achsendatei an.', warn_invalid_file_title='Ungültige Datei',
+    warn_no_line_layer='In QGIS ist kein linearer Vektor-Layer geladen.\nLade die Achse ins Projekt oder verwende den Modus „Datei“.',
+    warn_axis_not_exist='Die Achsendatei existiert nicht:\n{path}',
+    warn_no_outdir='Gib den Ausgabeordner an.',
+    warn_cannot_create_outdir='Der Ausgabeordner konnte nicht erstellt werden:\n{err}',
+    warn_nothing_selected_title='Nichts ausgewählt',
+    warn_nothing_selected='Aktiviere mindestens ein Register (Längsprofil, Querprofile, DGM-Puffer oder Höhenlinien).',
+    ask_curvas_no_buffer_title='Höhenlinien ohne Puffer',
+    ask_curvas_no_buffer='Höhenlinien benötigen einen DGM-Puffer.\n\nSoll der DGM-Puffer automatisch erzeugt werden?',
+    status_n_geometries='{n} Geometrien in der Achse erkannt.',
+    status_error='❌  Fehler während der Verarbeitung.', error_title='Fehler',
+    status_done_ok='✅  {n} Profil(e)  |  VE={cp}  |  {cache}',
+    status_done_warn='⚠️ {n} Profil(e)  |  VE={cp}  |  {cache}  |  Fehler aufgetreten, Zusammenfassung prüfen',
+    cache_hit='Cache', cache_miss='neuer Scan', result_title_warn='Mit Fehlern abgeschlossen',
+    result_title_ok='Verarbeitung abgeschlossen', result_mdt_buffer_error='⚠ DGM-Puffer: {err}',
+    result_curvas_error='⚠ Höhenlinien: {err}',
+)
 
 
 def _count_profiles_in_file(axis_path):
@@ -1044,6 +1202,7 @@ class PerfilLongitudinalDialog(QDialog):
         super().__init__(parent)
         self.worker = None
         self._result = None
+        self._pending_language = None
 
         self._settings = QSettings()
         saved_theme = self._settings.value("PerfilLongitudinalMDT/theme", None)
@@ -1356,17 +1515,13 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_eje3d_equidistancia.setValue(100.0)
         self.sp_eje3d_equidistancia.setDecimals(1)
         self.sp_eje3d_equidistancia.setSuffix(" m")
-        self.sp_eje3d_equidistancia.setToolTip(
-            "Equidistancia de las marcas de PK redondo en el eje 3D.\n"
-            "Ej: 100 m → marcas en 0+100, 0+200, 0+300...")
+        self.sp_eje3d_equidistancia.setToolTip(s['tooltip_eje3d_interval'])
         eq3d_row.addWidget(self.sp_eje3d_equidistancia)
         eq3d_row.addStretch()
         g.addLayout(eq3d_row, 8, 0, 1, 2)
 
         self.chk_gen_eje3d_eq = QCheckBox(s['chk_gen_eje3d_eq'])
-        self.chk_gen_eje3d_eq.setToolTip(
-            "DXF adicional con la polilínea 3D planchada sobre el MDT,\n"
-            "con un vértice cada intervalo de segmentación. Sin texto ni marcas.")
+        self.chk_gen_eje3d_eq.setToolTip(s['tooltip_eje3d_clean'])
         g.addWidget(self.chk_gen_eje3d_eq, 9, 0, 1, 2)
 
         layout.addWidget(self.grp_longitudinal)
@@ -1400,7 +1555,7 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_trans_spacing.setValue(20.0)
         self.sp_trans_spacing.setDecimals(1)
         self.sp_trans_spacing.setSuffix(" m")
-        self.sp_trans_spacing.setToolTip("Distancia entre secciones transversales a lo largo del eje.")
+        self.sp_trans_spacing.setToolTip(s['tooltip_trans_spacing'])
         g.addWidget(self.sp_trans_spacing, 0, 1)
 
         g.addWidget(QLabel(s['lbl_trans_left']), 1, 0)
@@ -1409,7 +1564,7 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_trans_left.setValue(10.0)
         self.sp_trans_left.setDecimals(1)
         self.sp_trans_left.setSuffix(" m")
-        self.sp_trans_left.setToolTip("Metros a muestrear a la izquierda del eje.")
+        self.sp_trans_left.setToolTip(s['tooltip_trans_left'])
         g.addWidget(self.sp_trans_left, 1, 1)
 
         g.addWidget(QLabel(s['lbl_trans_right']), 2, 0)
@@ -1418,7 +1573,7 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_trans_right.setValue(10.0)
         self.sp_trans_right.setDecimals(1)
         self.sp_trans_right.setSuffix(" m")
-        self.sp_trans_right.setToolTip("Metros a muestrear a la derecha del eje. Puede ser distinto al de izquierda.")
+        self.sp_trans_right.setToolTip(s['tooltip_trans_right'])
         g.addWidget(self.sp_trans_right, 2, 1)
 
         g.addWidget(QLabel(s['lbl_trans_step']), 3, 0)
@@ -1427,7 +1582,7 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_trans_step.setValue(1.0)
         self.sp_trans_step.setDecimals(2)
         self.sp_trans_step.setSuffix(" m")
-        self.sp_trans_step.setToolTip("Resolución del muestreo perpendicular al eje.")
+        self.sp_trans_step.setToolTip(s['tooltip_trans_step'])
         g.addWidget(self.sp_trans_step, 3, 1)
 
         sep = QLabel(s['sep_escalas_trans'])
@@ -1460,10 +1615,7 @@ class PerfilLongitudinalDialog(QDialog):
         trans_cp_row = QHBoxLayout()
         self.chk_trans_cplane_auto = QCheckBox(s['chk_trans_cplane_auto'])
         self.chk_trans_cplane_auto.setChecked(True)
-        self.chk_trans_cplane_auto.setToolTip(
-            "Cada transversal usa su propio plano: redondeado a 0.5 m por\n"
-            "debajo del punto más bajo del terreno EN ESA SECCIÓN (margen\n"
-            "pequeño y fijo, sin huecos grandes entre el plano y el terreno).")
+        self.chk_trans_cplane_auto.setToolTip(s['tooltip_trans_cplane_auto'])
         self.chk_trans_cplane_auto.toggled.connect(self._toggle_trans_cplane)
         trans_cp_row.addWidget(self.chk_trans_cplane_auto)
         self.sp_trans_cplane = QDoubleSpinBox()
@@ -1472,7 +1624,7 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_trans_cplane.setDecimals(2)
         self.sp_trans_cplane.setSuffix(" m")
         self.sp_trans_cplane.setEnabled(False)
-        self.sp_trans_cplane.setToolTip("Plano fijo igual para todas las transversales.")
+        self.sp_trans_cplane.setToolTip(s['tooltip_trans_cplane_fixed'])
         trans_cp_row.addWidget(self.sp_trans_cplane)
         trans_cp_row.addStretch()
         g.addLayout(trans_cp_row, 9, 1)
@@ -1486,12 +1638,7 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_trans_guitarra_eq.setValue(5.0)
         self.sp_trans_guitarra_eq.setDecimals(1)
         self.sp_trans_guitarra_eq.setSuffix(" m")
-        self.sp_trans_guitarra_eq.setToolTip(
-            "Se dibuja una columna en la mini-guitarra (con la cota del terreno)\n"
-            "cada esta distancia, a izquierda y derecha del eje, hasta llegar al\n"
-            "ancho configurado arriba (izquierda/derecha).\n"
-            "Ejemplos: 5 m → marca cada 5 m; 10 m → cada 10 m; 1 m → cada 1 m.\n"
-            "El propio eje (distancia 0) ya se marca aparte con un círculo y su cota.")
+        self.sp_trans_guitarra_eq.setToolTip(s['tooltip_trans_guitarra'])
         g.addWidget(self.sp_trans_guitarra_eq, 11, 1)
 
         layout.addWidget(self.grp_trans)
@@ -1525,11 +1672,7 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_mdt_buffer.setValue(100.0)
         self.sp_mdt_buffer.setDecimals(0)
         self.sp_mdt_buffer.setSuffix(" m")
-        self.sp_mdt_buffer.setToolTip(
-            "Buffer cuadrado aplicado al bbox del eje.\n"
-            "Se aplica también en sentido longitudinal (inicio y fin)\n"
-            "para asegurar cobertura completa en todas las direcciones."
-        )
+        self.sp_mdt_buffer.setToolTip(s['tooltip_buffer'])
         g.addWidget(self.sp_mdt_buffer, 0, 1)
 
         lbl_buf = QLabel(s['lbl_buf_info'])
@@ -1576,21 +1719,14 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_curvas_maestra.setValue(5.0)
         self.sp_curvas_maestra.setDecimals(1)
         self.sp_curvas_maestra.setSuffix(" m")
-        self.sp_curvas_maestra.setToolTip(
-            "Múltiplo de la equidistancia normal para curvas maestras\n"
-            "(líneas de mayor grosor y con etiqueta de cota).")
+        self.sp_curvas_maestra.setToolTip(s['tooltip_curvas_maestra'])
         g.addWidget(self.sp_curvas_maestra, 1, 1)
 
         g.addWidget(QLabel(s['lbl_curvas_smooth']), 2, 0)
         self.sp_curvas_smooth = QSpinBox()
         self.sp_curvas_smooth.setRange(0, 8)
         self.sp_curvas_smooth.setValue(2)
-        self.sp_curvas_smooth.setToolTip(
-            "Iteraciones del algoritmo de suavizado Chaikin.\n"
-            "0 = sin suavizar (escalones del píxel visibles)\n"
-            "1-2 = suave (recomendado)\n"
-            "3-4 = muy suave (puede alejarse del terreno real)\n"
-            "Cada iteración duplica el número de vértices.")
+        self.sp_curvas_smooth.setToolTip(s['tooltip_curvas_smooth'])
         g.addWidget(self.sp_curvas_smooth, 2, 1)
 
         g.addWidget(QLabel(s['lbl_curvas_min_longitud']), 3, 0)
@@ -1599,11 +1735,7 @@ class PerfilLongitudinalDialog(QDialog):
         self.sp_curvas_min_longitud.setValue(30.0)
         self.sp_curvas_min_longitud.setDecimals(1)
         self.sp_curvas_min_longitud.setSuffix(" m")
-        self.sp_curvas_min_longitud.setToolTip(
-            "Longitud mínima de una curva para ser exportada.\n"
-            "Las curvas (abiertas o cerradas) más cortas se descartan,\n"
-            "evitando minicurvas antiestéticas en zonas planas o bordes.\n"
-            "0 = exportar todas sin filtro.")
+        self.sp_curvas_min_longitud.setToolTip(s['tooltip_curvas_min_longitud'])
         g.addWidget(self.sp_curvas_min_longitud, 3, 1)
 
         # ── Reducción de vértices (Douglas-Peucker) ──────────────────────
@@ -1692,6 +1824,9 @@ class PerfilLongitudinalDialog(QDialog):
             if self._lang == 'es':
                 self.btn_theme.setText("☀️  Modo claro")
                 self.btn_theme.setToolTip("Cambiar a modo claro (fondos claros, textos oscuros)")
+            elif self._lang == 'de':
+                self.btn_theme.setText("☀️  Heller Modus")
+                self.btn_theme.setToolTip("In den hellen Modus wechseln")
             else:
                 self.btn_theme.setText("☀️  Light mode")
                 self.btn_theme.setToolTip("Switch to light mode (light background, dark text)")
@@ -1699,6 +1834,9 @@ class PerfilLongitudinalDialog(QDialog):
             if self._lang == 'es':
                 self.btn_theme.setText("🌙  Modo oscuro")
                 self.btn_theme.setToolTip("Cambiar a modo oscuro (fondos oscuros, textos claros)")
+            elif self._lang == 'de':
+                self.btn_theme.setText("🌙  Dunkler Modus")
+                self.btn_theme.setToolTip("In den dunklen Modus wechseln")
             else:
                 self.btn_theme.setText("🌙  Dark mode")
                 self.btn_theme.setToolTip("Switch to dark mode (dark background, light text)")
@@ -1781,6 +1919,15 @@ class PerfilLongitudinalDialog(QDialog):
         if language == self._lang:
             return
 
+        self._pending_language = language
+        QTimer.singleShot(0, self._apply_language_change)
+
+    def _apply_language_change(self):
+        language = self._pending_language
+        self._pending_language = None
+        if not language or language == self._lang:
+            return
+
         self._lang = language
         self._settings.setValue("PerfilLongitudinalMDT/lang", self._lang)
         self.strings = _STRINGS[self._lang]
@@ -1789,11 +1936,13 @@ class PerfilLongitudinalDialog(QDialog):
 
         old_layout = self.layout()
         if old_layout is not None:
-            QWidget().setLayout(old_layout)
+            self._old_layout_container = QWidget()
+            self._old_layout_container.setLayout(old_layout)
 
         self.setWindowTitle(self.strings['window_title'])
         self._build_ui()
         self._restore_state(snap)
+        self._old_layout_container.deleteLater()
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Exploradores

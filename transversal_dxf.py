@@ -207,6 +207,12 @@ _TRANS_SEP_Y = 150.0   # espacio vertical entre filas
 # en vez de una lista fija de distancias.
 _DEFAULT_GUITARRA_INTERVAL = 5.0
 
+_DXF_LABELS = {
+    'es': dict(pc='PC', station='PK', elevation='Cota (m)', distance='Dist (m)', prefix='T-'),
+    'en': dict(pc='CP', station='Chainage', elevation='Elevation (m)', distance='Dist. (m)', prefix='CS-'),
+    'de': dict(pc='VE', station='Station', elevation='Höhe (m)', distance='Abst. (m)', prefix='QP-'),
+}
+
 # Layout vertical (mm de papel) de la mini-guitarra: una franja de cabecera
 # (número de transversal + PK) y dos filas de datos (Cota encima, Distancia
 # debajo, tal y como se pidió).
@@ -244,6 +250,7 @@ def export_transversales_dxf(
     comparison_plane=None,
     guitarra_interval=None,
     progress_callback=None,
+    language='es',
 ):
     """
     Genera el DXF de perfiles transversales.
@@ -285,6 +292,8 @@ def export_transversales_dxf(
             from ezdxf.enums import TextEntityAlignment as TEA
         except Exception as e:
             raise RuntimeError(f"No se pudo cargar ezdxf: {e}")
+
+    labels = _DXF_LABELS.get(language, _DXF_LABELS['es'])
 
     if not guitarra_interval or guitarra_interval <= 0:
         guitarra_interval = _DEFAULT_GUITARRA_INTERVAL
@@ -449,7 +458,7 @@ def export_transversales_dxf(
         )
         # Cota del plano de comparación — antes no se indicaba en ningún sitio
         t_pc = msp.add_text(
-            f'PC={z_ref:.2f} m',
+            f"{labels['pc']}={z_ref:.2f} m",
             dxfattribs={'height': 1.8, 'layer': 'TRANS_BASE', 'color': 4}
         )
         t_pc.set_placement((ox + ancho_papel + 2.0, y_base), align=TEA.MIDDLE_LEFT)
@@ -512,7 +521,7 @@ def export_transversales_dxf(
 
         # Número de transversal
         t_num = msp.add_text(
-            f"T-{idx + 1}",
+            f"{labels['prefix']}{idx + 1}",
             dxfattribs={'height': h_txt * 1.2, 'layer': 'TRANS_TEXTOS', 'color': 1}
         )
         t_num.set_placement(
@@ -522,7 +531,7 @@ def export_transversales_dxf(
 
         # PK
         t_pk = msp.add_text(
-            f"PK {_format_pk(pk_val)}",
+            f"{labels['station']} {_format_pk(pk_val)}",
             dxfattribs={'height': h_txt, 'layer': 'TRANS_TEXTOS'}
         )
         t_pk.set_placement(
@@ -538,7 +547,8 @@ def export_transversales_dxf(
 
         # Etiquetas de fila, una vez por caja (a la izquierda, en el hueco
         # entre transversales)
-        for y_mid, label in ((y_cota_mid, 'Cota (m)'), (y_dist_mid, 'Dist (m)')):
+        for y_mid, label in ((y_cota_mid, labels['elevation']),
+                     (y_dist_mid, labels['distance'])):
             t_row = msp.add_text(
                 label,
                 dxfattribs={'height': 1.8, 'layer': 'TRANS_TEXTOS', 'color': 8})

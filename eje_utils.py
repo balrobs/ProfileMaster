@@ -918,7 +918,7 @@ def _equidistant_pk_points(pts_3d, interval, sampler, tol=0.05):
 def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
                            sampler=None, mark_size=_EJE3D_MARK_SIZE,
                            text_height=_EJE3D_TEXT_HEIGHT,
-                           clean_equidistant=False):
+                           clean_equidistant=False, language='es'):
     """
     Exporta VARIOS ejes 3D planchados a un único DXF de planta.
 
@@ -958,6 +958,13 @@ def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
             if axes_list:
                 _export_axis_ogr(axes_list[0][1], output_path)
             return
+
+    dxf_labels = {
+        'es': ('V', 'PK'),
+        'en': ('V', 'CH'),
+        'de': ('K', 'Stat.'),
+    }.get(language, ('V', 'PK'))
+    vertex_prefix, station_label = dxf_labels
 
     doc = ezdxf.new('R2010', setup=True)
     msp = doc.modelspace()
@@ -1009,7 +1016,7 @@ def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
                 ty = y + ly * off
 
                 t = msp.add_text(
-                    f'V{v_num}  PK {_format_pk(d)}',
+                    f'{vertex_prefix}{v_num}  {station_label} {_format_pk(d)}',
                     dxfattribs={'height': text_height, 'layer': ltxt,
                                 'rotation': 0.0})
                 t.set_placement((tx, ty, z), align=_TEA.LEFT)
@@ -1036,7 +1043,7 @@ def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
                     ty = yi + ly * off
 
                     t = msp.add_text(
-                        f'PK {_format_pk(di)}',
+                        f'{station_label} {_format_pk(di)}',
                         dxfattribs={'height': text_height * 0.85, 'layer': ltxt,
                                     'rotation': 0.0})
                     t.set_placement((tx, ty, zi), align=_TEA.LEFT)

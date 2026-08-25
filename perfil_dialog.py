@@ -286,13 +286,17 @@ def _build_stylesheet(theme):
 #  (ver _snapshot_state / _restore_state).
 # ─────────────────────────────────────────────────────────────────────────────
 
+_LANGUAGES = [
+    ('es', 'Español'),
+    ('en', 'English'),
+    ('de', 'Deutsch'),
+]
+
 _STRINGS = {
     'es': dict(
         window_title='ProfileMaster',
         header_title='🗻  ProfileMaster',
         subtitle='Perfil longitudinal · Transversales · MDT buffer · Curvas de nivel',
-        btn_lang='EN',
-        btn_lang_tooltip='Switch interface to English',
 
         grp1_title='1. Datos de entrada',
         lbl_mdt='MDT:',
@@ -449,8 +453,6 @@ _STRINGS = {
         window_title='ProfileMaster',
         header_title='🗻  ProfileMaster',
         subtitle='Longitudinal profile · Cross-sections · DTM buffer · Contour lines',
-        btn_lang='ES',
-        btn_lang_tooltip='Cambiar la interfaz a español',
 
         grp1_title='1. Input data',
         lbl_mdt='DTM:',
@@ -1055,7 +1057,7 @@ class PerfilLongitudinalDialog(QDialog):
             self._theme = 'dark' if bg_lightness < 128 else 'light'
 
         saved_lang = self._settings.value("PerfilLongitudinalMDT/lang", None)
-        if saved_lang in ('es', 'en'):
+        if saved_lang in ('es', 'en', 'de'):
             self._lang = saved_lang
         else:
             sys_lang = QSettings().value("locale/userLocale", "") or ""
@@ -1092,10 +1094,18 @@ class PerfilLongitudinalDialog(QDialog):
         header_row.addWidget(title)
         header_row.addStretch()
 
-        self.btn_lang = QPushButton()
-        self.btn_lang.setObjectName("btn_theme")
-        self.btn_lang.clicked.connect(self._toggle_lang)
-        header_row.addWidget(self.btn_lang)
+        self.cmb_lang = QComboBox()
+        self.cmb_lang.setObjectName("cmb_lang")
+
+        for code, name in _LANGUAGES:
+            self.cmb_lang.addItem(name, code)
+
+        index = self.cmb_lang.findData(self._lang)
+        if index >= 0:
+            self.cmb_lang.setCurrentIndex(index)
+
+        self.cmb_lang.currentIndexChanged.connect(self._language_changed)
+        header_row.addWidget(self.cmb_lang)
 
         self.btn_theme = QPushButton()
         self.btn_theme.setObjectName("btn_theme")
@@ -1247,7 +1257,6 @@ class PerfilLongitudinalDialog(QDialog):
         main.addLayout(btn_row)
 
         self._update_theme_button()
-        self._update_lang_button()
 
     # ── PESTAÑA 1: Longitudinal ───────────────────────────────────────────
 
@@ -1766,16 +1775,18 @@ class PerfilLongitudinalDialog(QDialog):
         if tab_index is not None and hasattr(self, 'tabs'):
             self.tabs.setCurrentIndex(tab_index)
 
-    def _toggle_lang(self):
-        self._lang = 'en' if self._lang == 'es' else 'es'
+    def _language_changed(self, index):
+        language = self.cmb_lang.itemData(index)
+
+        if language == self._lang:
+            return
+
+        self._lang = language
         self._settings.setValue("PerfilLongitudinalMDT/lang", self._lang)
         self.strings = _STRINGS[self._lang]
 
         snap = self._snapshot_state()
 
-        # Vacía el layout actual reasignándolo a un widget "de usar y tirar"
-        # que Qt destruirá junto con todos sus hijos; así _build_ui() puede
-        # crear un QVBoxLayout(self) nuevo sin chocar con el anterior.
         old_layout = self.layout()
         if old_layout is not None:
             QWidget().setLayout(old_layout)
@@ -1783,10 +1794,6 @@ class PerfilLongitudinalDialog(QDialog):
         self.setWindowTitle(self.strings['window_title'])
         self._build_ui()
         self._restore_state(snap)
-
-    def _update_lang_button(self):
-        self.btn_lang.setText(f"🌐  {self.strings['btn_lang']}")
-        self.btn_lang.setToolTip(self.strings['btn_lang_tooltip'])
 
     # ─────────────────────────────────────────────────────────────────────────
     #  Exploradores

@@ -919,7 +919,7 @@ def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
                            sampler=None, mark_size=_EJE3D_MARK_SIZE,
                            text_height=_EJE3D_TEXT_HEIGHT,
                            clean_equidistant=False, language='es',
-                           draw_cross_sections=FALSE,
+                           draw_cross_sections=False,
                            cross_section_spacing=0.0,
                            cross_section_left=0.0,
                            cross_section_right=0.0):

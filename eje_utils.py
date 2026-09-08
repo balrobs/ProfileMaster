@@ -1117,19 +1117,10 @@ def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
                 x_right = x + rx * cross_section_right
                 y_right = y + ry * cross_section_right
 
-                # Se obtiene la cota del MDT para ambos extremos.
-                z_left = sampler.sample(x_left, y_left) if sampler else None
-                z_right = sampler.sample(x_right, y_right) if sampler else None
-
-                if z_left is None:
-                    z_left = z if z is not None else 0.0
-
-                if z_right is None:
-                    z_right = z if z is not None else 0.0
-
+                # Los perfiles transversales se dibujan siempre en Z=0.
                 msp.add_line(
-                    (x_left, y_left, z_left),
-                    (x_right, y_right, z_right),
+                    (x_left, y_left, 0.0),
+                    (x_right, y_right, 0.0),
                     dxfattribs={'layer': cross_layer}
                 )
 
@@ -1166,9 +1157,10 @@ def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
                 if z_right is None:
                     z_right = z if z is not None else 0.0
 
+                # Los perfiles transversales se dibujan siempre en Z=0.
                 msp.add_line(
-                    (x_left, y_left, z_left),
-                    (x_right, y_right, z_right),
+                    (x_left, y_left, 0.0),
+                    (x_right, y_right, 0.0),
                     dxfattribs={'layer': cross_layer}
                 )
     

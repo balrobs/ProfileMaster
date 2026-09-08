@@ -235,7 +235,6 @@ def _paper_y(z, z_ref, v_scale):
     """Convierte cota real (m) a coordenada Y en papel (mm) respecto al plano z_ref."""
     return (z - z_ref) / v_scale * 1000.0
 
-
 def export_transversales_dxf(
     vertices_2d,
     sampler,
@@ -265,22 +264,17 @@ def export_transversales_dxf(
     sample_step      : float  — paso de muestreo transversal (m)
     output_path      : str    — ruta DXF de salida
     h_scale          : int    — escala horizontal
-    v_scale          : int    — escala vertical (referencia inicial; se ajusta por sección)
+    v_scale          : int    — escala vertical real
     axis_name        : str    — nombre del eje
     comparison_plane : float|None
         None  → plano automático por sección: redondeado a 0.5 m por debajo
-               del punto más bajo del terreno de esa sección (margen pequeño,
-               sin el hueco enorme de usar múltiplos de 5 m).
+                del punto más bajo del terreno de esa sección.
         float → plano fijo igual para todas las secciones
     guitarra_interval : float | None
-        Equidistancia (m) de la mini-guitarra de cada transversal: se dibuja
-        una columna con la cota del terreno cada 'guitarra_interval' metros,
-        a izquierda y derecha del eje, hasta llegar a dist_left/dist_right
-        (no una lista fija de distancias). Por defecto 5.0 m. El propio eje
-        (distancia 0) no se repite aquí porque ya se marca aparte con un
-        círculo y su cota.
+        Equidistancia (m) de la mini-guitarra de cada transversal.
     progress_callback : callable(pct, msg)
     """
+
     try:
         import ezdxf
         from ezdxf.enums import TextEntityAlignment as TEA
@@ -299,16 +293,19 @@ def export_transversales_dxf(
         guitarra_interval = _DEFAULT_GUITARRA_INTERVAL
 
     def _guitarra_offsets_for(d_left, d_right):
-        """Genera las distancias -d_left..0..d_right a equidistancia, incluyendo el centro (0)."""
-        offs = [0.0]  # siempre incluir el eje central
+        """Genera las distancias -d_left..0..d_right a equidistancia."""
+        offs = [0.0]
+
         d = guitarra_interval
         while d <= d_right + 1e-6:
             offs.append(d)
             d += guitarra_interval
+
         d = -guitarra_interval
         while d >= -d_left - 1e-6:
             offs.append(d)
             d -= guitarra_interval
+
         return sorted(offs)
 
     total_len = _axis_total_length(vertices_2d)
@@ -316,85 +313,131 @@ def export_transversales_dxf(
     # Generar lista de PKs de transversales
     pks = []
     pk = 0.0
+
     while pk <= total_len + 1e-6:
         pks.append(min(pk, total_len))
         pk += spacing
+
     if abs(pks[-1] - total_len) > 1e-3:
         pks.append(total_len)
 
     n_trans = len(pks)
+
     if progress_callback:
-        progress_callback(5, f"Generando {n_trans} transversales...")
+        progress_callback(
+            5,
+            f"Generando {n_trans} transversales..."
+        )
 
     doc = ezdxf.new('R2010', setup=True)
     msp = doc.modelspace()
 
     # Capas
     for lname, color, ltype in [
-        ('TRANS_TERRENO', 3, 'Continuous'),    # verde
-        ('TRANS_BASE', 4, 'DASHED'),           # cyan
-        ('TRANS_EJE', 1, 'Continuous'),        # rojo
-        ('TRANS_COTAS', 3, 'Continuous'),      # verde
-        ('TRANS_TEXTOS', 7, 'Continuous'),     # blanco/negro
-        ('TRANS_MARCO', 8, 'Continuous'),      # gris
-        ('TRANS_GUITARRA', 8, 'Continuous'),   # gris — marco/ticks de la mini-guitarra
-        ('TRANS_GUIA', 8, 'DOT'),              # gris — líneas guía punteadas
+        ('TRANS_TERRENO', 3, 'Continuous'),
+        ('TRANS_BASE', 4, 'DASHED'),
+        ('TRANS_EJE', 1, 'Continuous'),
+        ('TRANS_COTAS', 3, 'Continuous'),
+        ('TRANS_TEXTOS', 7, 'Continuous'),
+        ('TRANS_MARCO', 8, 'Continuous'),
+        ('TRANS_GUITARRA', 8, 'Continuous'),
+        ('TRANS_GUIA', 8, 'DOT'),
     ]:
         if lname not in doc.layers:
             lay = doc.layers.new(lname)
             lay.color = color
+
             try:
                 lay.dxf.linetype = ltype
             except Exception:
                 pass
 
-    # Dimensiones de cada caja transversal en papel (mm)
-    ancho_papel = _paper_x(dist_left + dist_right, h_scale)
-    # alto de la caja: zona de terreno + mini-guitarra (cabecera + 2 filas)
-    alto_zona = 80.0      # mm para la curva de terreno
-    alto_guitarra = _GUIT_HEADER_H + 2 * _GUIT_ROW_H  # mm para las anotaciones
-    alto_caja = alto_zona + alto_guitarra
+    # ── Dimensiones de cada caja transversal en papel ──────────────────
 
-    cols = max(1, int(1200 / (ancho_papel + 30)))  # cuántas transversales por fila
+    ancho_papel = _paper_x(
+        dist_left + dist_right,
+        h_scale
+    )
 
-    # Offsets de la mini-guitarra (mismos para todas las secciones, ya que
-    # dist_left/dist_right son constantes para todo el trazado)
-    guitarra_offsets = _guitarra_offsets_for(dist_left, dist_right)
+    # Altura de la mini-guitarra:
+    # cabecera + dos filas de datos.
+    alto_guitarra = (
+        _GUIT_HEADER_H +
+        2 * _GUIT_ROW_H
+    )
+
+    # Número de transversales por fila.
+    cols = max(
+        1,
+        int(1200 / (ancho_papel + 30))
+    )
+
+    # Escala vertical seleccionada por el usuario.
+    #
+    # Esta escala se mantiene constante para todos los perfiles.
+    # Ya no se calcula una escala diferente para cada sección.
+    v_scale_local = float(v_scale)
+
+    if v_scale_local <= 0:
+        raise ValueError(
+            "La escala vertical debe ser mayor que cero."
+        )
+
+    # Offsets de la mini-guitarra.
+    guitarra_offsets = _guitarra_offsets_for(
+        dist_left,
+        dist_right
+    )
+
+    # ───────────────────────────────────────────────────────────────────
+    # Precalculo de todos los perfiles
+    # ───────────────────────────────────────────────────────────────────
+    #
+    # Primero calculamos los datos de todos los perfiles.
+    # Esto permite conocer la altura necesaria de cada perfil antes
+    # de dibujar las cajas.
+    #
+    # Es importante mantener una entrada por cada PK, incluso cuando
+    # un perfil no contiene datos válidos del MDT. De esta forma no
+    # cambian la numeración ni la posición de los perfiles.
+
+    section_data = []
 
     for idx, pk_val in enumerate(pks):
-        if progress_callback and idx % max(1, n_trans // 20) == 0:
-            progress_callback(
-                5 + int(idx / n_trans * 90),
-                f"Transversal {idx + 1}/{n_trans} — PK {_format_pk(pk_val)}"
-            )
-
-        # Posición de esta caja en el DXF
-        col = idx % cols
-        row = idx // cols
-        ox = col * (ancho_papel + 30.0)   # origen X (mm)
-        oy = -row * (alto_caja + 20.0)    # origen Y (mm)
 
         # Punto sobre el eje y tangente
-        cx, cy, ux, uy = _find_segment_at(vertices_2d, pk_val)
+        cx, cy, ux, uy = _find_segment_at(
+            vertices_2d,
+            pk_val
+        )
 
         # Muestreo transversal
         raw_pts = _sample_transversal(
-            cx, cy, ux, uy, dist_left, dist_right, sample_step, sampler)
+            cx,
+            cy,
+            ux,
+            uy,
+            dist_left,
+            dist_right,
+            sample_step,
+            sampler
+        )
+
         pts = _interpolate_z_transversal(raw_pts)
 
-        if not pts:
-            continue
-
-        # ── Plano de comparación ─────────────────────────────────────────────
+        # Obtener las cotas válidas
         zs = [
             float(z)
             for _, z, _, _ in pts
             if _is_valid_z(z)
         ]
+
+        # Sin datos válidos del MDT
         if not zs:
+            section_data.append(None)
             continue
 
-        # Cota del eje en esta sección (punto donde dist == 0)
+        # Cota del eje
         z_axis_val = next(
             (
                 float(z)
@@ -403,84 +446,287 @@ def export_transversales_dxf(
             ),
             None
         )
+
         if z_axis_val is not None:
             z_axis_val = float(z_axis_val)
 
         z_min_section = min(zs)
         z_max = max(zs)
 
+        # ── Plano de comparación ─────────────────────────────────────
+
         # El plano de comparación debe ser un valor numérico válido.
-        # Los valores NoData/NaN del perfil transversal no deben interrumpir la generación del DXF.
+        # Los valores NoData/NaN no deben interrumpir la generación
+        # del DXF.
+
         if comparison_plane is not None:
             try:
                 z_ref = float(comparison_plane)
+
                 if not math.isfinite(z_ref):
                     raise ValueError
+
             except (TypeError, ValueError):
                 z_ref = math.floor(
                     (z_min_section - _AUTO_PLANE_MARGIN) * 2
                 ) / 2.0
+
         else:
             z_ref = math.floor(
                 (z_min_section - _AUTO_PLANE_MARGIN) * 2
             ) / 2.0
 
-        # ── Altura de la zona de terreno (en papel) ─────────────────────────
-        z_range = max(z_max - z_ref, 0.5)
-        # Escalar para que el terreno quepa en alto_zona mm
-        v_scale_local = z_range / (alto_zona / 1000.0)
+        # Rango vertical real del perfil.
+        z_range = max(
+            z_max - z_ref,
+            0.5
+        )
 
-        # ── Marco exterior ───────────────────────────────────────────────────
+        # Altura necesaria en papel según la escala vertical real.
+        #
+        # Ejemplo:
+        # V 1:100 → 1 m real = 10 mm en el papel.
+        # V 1:200 → 1 m real = 5 mm en el papel.
+        height_terrain = (
+            z_range / v_scale_local * 1000.0
+        )
+
+        section_data.append({
+            'pk': pk_val,
+            'cx': cx,
+            'cy': cy,
+            'ux': ux,
+            'uy': uy,
+            'pts': pts,
+            'z_ref': z_ref,
+            'z_range': z_range,
+            'height_terrain': height_terrain,
+            'z_axis_val': z_axis_val,
+        })
+
+    # ───────────────────────────────────────────────────────────────────
+    # Altura común del marco para cada fila
+    # ───────────────────────────────────────────────────────────────────
+    #
+    # Todos los perfiles de una misma fila utilizan la altura del perfil
+    # que necesita más espacio vertical.
+    #
+    # De esta forma:
+    # - todos los perfiles de una fila tienen el mismo marco;
+    # - la escala vertical sigue siendo exactamente la seleccionada;
+    # - cada perfil conserva su altura real.
+
+    row_heights = {}
+
+    for idx, section in enumerate(section_data):
+
+        if section is None:
+            continue
+
+        row = idx // cols
+        current_height = section['height_terrain']
+
+        if row not in row_heights:
+            row_heights[row] = current_height
+        else:
+            row_heights[row] = max(
+                row_heights[row],
+                current_height
+            )
+
+    # Altura mínima de la zona del terreno.
+    #
+    # Evita marcos excesivamente pequeños en perfiles casi planos.
+    MIN_TERRAIN_HEIGHT = 20.0
+
+    for row in row_heights:
+        row_heights[row] = max(
+            row_heights[row],
+            MIN_TERRAIN_HEIGHT
+        )
+
+    # ───────────────────────────────────────────────────────────────────
+    # Dibujo de los perfiles
+    # ───────────────────────────────────────────────────────────────────
+
+    for idx, pk_val in enumerate(pks):
+
+        if progress_callback and idx % max(
+            1,
+            n_trans // 20
+        ) == 0:
+
+            progress_callback(
+                5 + int(idx / n_trans * 90),
+                f"Transversal {idx + 1}/{n_trans} — "
+                f"PK {_format_pk(pk_val)}"
+            )
+
+        section = section_data[idx]
+
+        # Si no hay datos válidos del MDT, no se dibuja el perfil.
+        if section is None:
+            continue
+
+        # Recuperar datos precalculados
+        cx = section['cx']
+        cy = section['cy']
+        ux = section['ux']
+        uy = section['uy']
+        pts = section['pts']
+        z_ref = section['z_ref']
+        z_axis_val = section['z_axis_val']
+
+        # Posición de esta caja en el DXF
+        col = idx % cols
+        row = idx // cols
+
+        ox = col * (
+            ancho_papel + 30.0
+        )
+
+        # Altura común para todos los perfiles de esta fila.
+        alto_zona = row_heights[row]
+
+        # Altura total del marco:
+        # zona del terreno + mini-guitarra.
+        alto_caja = (
+            alto_zona +
+            alto_guitarra
+        )
+
+        # Posición vertical de la fila.
+        #
+        # La altura utilizada aquí corresponde a la altura real de
+        # la fila y no a una altura fija para todos los perfiles.
+        oy = -row * (
+            alto_caja + 20.0
+        )
+
+        # ── Marco exterior ────────────────────────────────────────────
+
         marco_pts = [
             (ox, oy + alto_guitarra),
-            (ox + ancho_papel, oy + alto_guitarra),
-            (ox + ancho_papel, oy + alto_caja),
-            (ox, oy + alto_caja),
+            (
+                ox + ancho_papel,
+                oy + alto_guitarra
+            ),
+            (
+                ox + ancho_papel,
+                oy + alto_caja
+            ),
+            (
+                ox,
+                oy + alto_caja
+            ),
             (ox, oy + alto_guitarra),
         ]
-        msp.add_lwpolyline(marco_pts, dxfattribs={'layer': 'TRANS_MARCO', 'lineweight': 25})
 
-        # Marco guitarra (zona inferior)
+        msp.add_lwpolyline(
+            marco_pts,
+            dxfattribs={
+                'layer': 'TRANS_MARCO',
+                'lineweight': 25
+            }
+        )
+
+        # ── Marco guitarra (zona inferior) ────────────────────────────
+
         guitarra_pts = [
             (ox, oy),
-            (ox + ancho_papel, oy),
-            (ox + ancho_papel, oy + alto_guitarra),
-            (ox, oy + alto_guitarra),
+            (
+                ox + ancho_papel,
+                oy
+            ),
+            (
+                ox + ancho_papel,
+                oy + alto_guitarra
+            ),
+            (
+                ox,
+                oy + alto_guitarra
+            ),
             (ox, oy),
         ]
-        msp.add_lwpolyline(guitarra_pts, dxfattribs={'layer': 'TRANS_MARCO', 'lineweight': 15})
 
-        # ── Línea base (z_ref) ───────────────────────────────────────────────
-        y_base = oy + alto_guitarra
-        msp.add_line(
-            (ox, y_base), (ox + ancho_papel, y_base),
-            dxfattribs={'layer': 'TRANS_BASE', 'lineweight': 18}
+        msp.add_lwpolyline(
+            guitarra_pts,
+            dxfattribs={
+                'layer': 'TRANS_MARCO',
+                'lineweight': 15
+            }
         )
-        # Cota del plano de comparación — antes no se indicaba en ningún sitio
+
+        # ── Línea base (z_ref) ─────────────────────────────────────────
+
+        y_base = oy + alto_guitarra
+
+        msp.add_line(
+            (ox, y_base),
+            (
+                ox + ancho_papel,
+                y_base
+            ),
+            dxfattribs={
+                'layer': 'TRANS_BASE',
+                'lineweight': 18
+            }
+        )
+
+        # Cota del plano de comparación
         t_pc = msp.add_text(
             f"{labels['pc']}={z_ref:.2f} m",
-            dxfattribs={'height': 1.8, 'layer': 'TRANS_BASE', 'color': 4}
+            dxfattribs={
+                'height': 1.8,
+                'layer': 'TRANS_BASE',
+                'color': 4
+            }
         )
-        t_pc.set_placement((ox + ancho_papel + 2.0, y_base), align=TEA.MIDDLE_LEFT)
 
-        # ── Línea del eje vertical ───────────────────────────────────────────
-        x_axis_paper = ox + _paper_x(dist_left, h_scale)
+        t_pc.set_placement(
+            (
+                ox + ancho_papel + 2.0,
+                y_base
+            ),
+            align=TEA.MIDDLE_LEFT
+        )
+
+        # ── Línea del eje vertical ────────────────────────────────────
+
+        x_axis_paper = (
+            ox +
+            _paper_x(
+                dist_left,
+                h_scale
+            )
+        )
+
         msp.add_line(
             (x_axis_paper, y_base),
-            (x_axis_paper, oy + alto_caja),
-            dxfattribs={'layer': 'TRANS_EJE', 'lineweight': 18}
+            (
+                x_axis_paper,
+                oy + alto_caja
+            ),
+            dxfattribs={
+                'layer': 'TRANS_EJE',
+                'lineweight': 18
+            }
         )
 
-        # ── Línea de terreno ─────────────────────────────────────────────────
+        # ── Línea de terreno ──────────────────────────────────────────
+        #
         # Los valores None/NaN representan zonas sin datos del MDT.
         # Cada tramo continuo de valores válidos se dibuja como una
         # polilínea independiente.
+        #
         # No se interpola ni se conecta a través de zonas NoData.
 
         terrain_segment = []
 
         for d, z, _, _ in pts:
+
             if not _is_valid_z(z):
+
                 if len(terrain_segment) >= 2:
                     msp.add_lwpolyline(
                         terrain_segment,
@@ -489,16 +735,32 @@ def export_transversales_dxf(
                             'lineweight': 35
                         }
                     )
+
                 terrain_segment = []
                 continue
 
-            px = ox + _paper_x(dist_left + d, h_scale)
-            py = y_base + _paper_y(
-                float(z),
-                z_ref,
-                v_scale_local
+            px = (
+                ox +
+                _paper_x(
+                    dist_left + d,
+                    h_scale
+                )
             )
-            terrain_segment.append((px, py))
+
+            # Se utiliza directamente la escala vertical seleccionada
+            # por el usuario.
+            py = (
+                y_base +
+                _paper_y(
+                    float(z),
+                    z_ref,
+                    v_scale_local
+                )
+            )
+
+            terrain_segment.append(
+                (px, py)
+            )
 
         # Último segmento
         if len(terrain_segment) >= 2:
@@ -510,105 +772,284 @@ def export_transversales_dxf(
                 }
             )
 
-        # ── Cabecera de la mini-guitarra: número de transversal + PK ────────
+        # ── Cabecera de la mini-guitarra ───────────────────────────────
+        # Número de transversal + PK
+
         h_txt = 2.5
-        y_header_bot = oy + 2 * _GUIT_ROW_H   # límite cabecera / fila Cota
-        y_cota_bot = oy + _GUIT_ROW_H         # límite fila Cota / fila Distancia
-        y_txt_num = y_header_bot + _GUIT_HEADER_H * 0.72
-        y_txt_pk = y_header_bot + _GUIT_HEADER_H * 0.28
-        y_cota_mid = (y_header_bot + y_cota_bot) / 2.0
-        y_dist_mid = (y_cota_bot + oy) / 2.0
+
+        y_header_bot = (
+            oy +
+            2 * _GUIT_ROW_H
+        )
+
+        y_cota_bot = (
+            oy +
+            _GUIT_ROW_H
+        )
+
+        y_txt_num = (
+            y_header_bot +
+            _GUIT_HEADER_H * 0.72
+        )
+
+        y_txt_pk = (
+            y_header_bot +
+            _GUIT_HEADER_H * 0.28
+        )
+
+        y_cota_mid = (
+            y_header_bot +
+            y_cota_bot
+        ) / 2.0
+
+        y_dist_mid = (
+            y_cota_bot +
+            oy
+        ) / 2.0
 
         # Número de transversal
         t_num = msp.add_text(
             f"{labels['prefix']}{idx + 1}",
-            dxfattribs={'height': h_txt * 1.2, 'layer': 'TRANS_TEXTOS', 'color': 1}
+            dxfattribs={
+                'height': h_txt * 1.2,
+                'layer': 'TRANS_TEXTOS',
+                'color': 1
+            }
         )
+
         t_num.set_placement(
-            (ox + ancho_papel / 2, y_txt_num),
+            (
+                ox + ancho_papel / 2,
+                y_txt_num
+            ),
             align=TEA.MIDDLE_CENTER
         )
 
         # PK
         t_pk = msp.add_text(
-            f"{labels['station']} {_format_pk(pk_val)}",
-            dxfattribs={'height': h_txt, 'layer': 'TRANS_TEXTOS'}
+            f"{labels['station']} "
+            f"{_format_pk(pk_val)}",
+            dxfattribs={
+                'height': h_txt,
+                'layer': 'TRANS_TEXTOS'
+            }
         )
+
         t_pk.set_placement(
-            (ox + ancho_papel / 2, y_txt_pk),
+            (
+                ox + ancho_papel / 2,
+                y_txt_pk
+            ),
             align=TEA.MIDDLE_CENTER
         )
 
-        # ── Separadores horizontales de la mini-guitarra (cabecera/cota/dist) ─
-        for y_sep in (y_header_bot, y_cota_bot):
-            msp.add_line(
-                (ox, y_sep), (ox + ancho_papel, y_sep),
-                dxfattribs={'layer': 'TRANS_GUITARRA', 'lineweight': 13})
+        # ── Separadores horizontales de la mini-guitarra ──────────────
 
-        # Etiquetas de fila, una vez por caja (a la izquierda, en el hueco
-        # entre transversales)
-        for y_mid, label in ((y_cota_mid, labels['elevation']),
-                     (y_dist_mid, labels['distance'])):
+        for y_sep in (
+            y_header_bot,
+            y_cota_bot
+        ):
+
+            msp.add_line(
+                (ox, y_sep),
+                (
+                    ox + ancho_papel,
+                    y_sep
+                ),
+                dxfattribs={
+                    'layer': 'TRANS_GUITARRA',
+                    'lineweight': 13
+                }
+            )
+
+        # Etiquetas de fila
+        for y_mid, label in (
+            (y_cota_mid, labels['elevation']),
+            (y_dist_mid, labels['distance'])
+        ):
+
             t_row = msp.add_text(
                 label,
-                dxfattribs={'height': 1.8, 'layer': 'TRANS_TEXTOS', 'color': 8})
-            t_row.set_placement((ox - 2.0, y_mid), align=TEA.MIDDLE_RIGHT)
+                dxfattribs={
+                    'height': 1.8,
+                    'layer': 'TRANS_TEXTOS',
+                    'color': 8
+                }
+            )
 
-        # ── Mini-guitarra: columnas con cota (encima) y distancia (debajo) ───
-        # en las distancias configuradas (negativas = izquierda, positivas =
-        # derecha), con guía punteada hasta el punto real del terreno.
+            t_row.set_placement(
+                (ox - 2.0, y_mid),
+                align=TEA.MIDDLE_RIGHT
+            )
+
+        # ── Mini-guitarra ─────────────────────────────────────────────
+        #
+        # Columnas con cota y distancia en las posiciones configuradas.
+        # Las guías se dibujan desde la guitarra hasta el terreno real.
+
         for d_off in guitarra_offsets:
-            if d_off < -dist_left - 1e-6 or d_off > dist_right + 1e-6:
-                continue  # fuera del ancho muestreado en esta sección
 
-            z_off = _interp_at_offset(pts, d_off)
+            if (
+                d_off < -dist_left - 1e-6
+                or d_off > dist_right + 1e-6
+            ):
+                continue
+
+            z_off = _interp_at_offset(
+                pts,
+                d_off
+            )
+
             if z_off is None:
                 continue
 
-            px_col = ox + _paper_x(dist_left + d_off, h_scale)
+            px_col = (
+                ox +
+                _paper_x(
+                    dist_left + d_off,
+                    h_scale
+                )
+            )
 
-            # Pequeñas marcas verticales en cada línea horizontal de la
-            # mini-guitarra (mismo estilo que el perfil longitudinal)
-            for y_sep in (y_base, y_header_bot, y_cota_bot, oy):
+            # Pequeñas marcas verticales en cada línea horizontal
+            # de la mini-guitarra.
+            for y_sep in (
+                y_base,
+                y_header_bot,
+                y_cota_bot,
+                oy
+            ):
+
                 msp.add_line(
-                    (px_col, y_sep - _GUIT_TICK_H), (px_col, y_sep + _GUIT_TICK_H),
-                    dxfattribs={'layer': 'TRANS_GUITARRA', 'lineweight': 9})
+                    (
+                        px_col,
+                        y_sep - _GUIT_TICK_H
+                    ),
+                    (
+                        px_col,
+                        y_sep + _GUIT_TICK_H
+                    ),
+                    dxfattribs={
+                        'layer': 'TRANS_GUITARRA',
+                        'lineweight': 9
+                    }
+                )
 
-            # Guía punteada desde la guitarra hasta el punto real del terreno
-            py_terr = y_base + _paper_y(z_off, z_ref, v_scale_local)
+            # Guía punteada desde la guitarra hasta el terreno.
+            #
+            # También aquí se utiliza la escala vertical real
+            # seleccionada por el usuario.
+            py_terr = (
+                y_base +
+                _paper_y(
+                    z_off,
+                    z_ref,
+                    v_scale_local
+                )
+            )
+
             msp.add_line(
-                (px_col, y_base), (px_col, py_terr),
-                dxfattribs={'layer': 'TRANS_GUIA', 'lineweight': 9})
+                (px_col, y_base),
+                (
+                    px_col,
+                    py_terr
+                ),
+                dxfattribs={
+                    'layer': 'TRANS_GUIA',
+                    'lineweight': 9
+                }
+            )
 
+            # Cota
             t_cota_col = msp.add_text(
                 f"{z_off:.2f}",
-                dxfattribs={'height': 1.5, 'layer': 'TRANS_COTAS', 'color': 3,
-                            'rotation': 90.0})
-            t_cota_col.set_placement((px_col, y_cota_mid), align=TEA.MIDDLE_CENTER)
+                dxfattribs={
+                    'height': 1.5,
+                    'layer': 'TRANS_COTAS',
+                    'color': 3,
+                    'rotation': 90.0
+                }
+            )
 
-            dist_lbl = "0" if abs(d_off) < 1e-6 else f"{d_off:+.1f}"
+            t_cota_col.set_placement(
+                (px_col, y_cota_mid),
+                align=TEA.MIDDLE_CENTER
+            )
+
+            # Distancia
+            dist_lbl = (
+                "0"
+                if abs(d_off) < 1e-6
+                else f"{d_off:+.1f}"
+            )
+
             t_dist_col = msp.add_text(
                 dist_lbl,
-                dxfattribs={'height': 1.5, 'layer': 'TRANS_TEXTOS', 'color': 7,
-                            'rotation': 90.0})
-            t_dist_col.set_placement((px_col, y_dist_mid), align=TEA.MIDDLE_CENTER)
+                dxfattribs={
+                    'height': 1.5,
+                    'layer': 'TRANS_TEXTOS',
+                    'color': 7,
+                    'rotation': 90.0
+                }
+            )
 
-        # ── Cota en el eje (PK central de la sección) ────────────────────────
+            t_dist_col.set_placement(
+                (px_col, y_dist_mid),
+                align=TEA.MIDDLE_CENTER
+            )
+
+        # ── Cota en el eje ─────────────────────────────────────────────
+
         if z_axis_val is not None:
+
             x_a = x_axis_paper
-            y_a = y_base + _paper_y(z_axis_val, z_ref, v_scale_local)
-            msp.add_circle((x_a, y_a), 1.0,
-                           dxfattribs={'layer': 'TRANS_COTAS', 'color': 1})
+
+            y_a = (
+                y_base +
+                _paper_y(
+                    z_axis_val,
+                    z_ref,
+                    v_scale_local
+                )
+            )
+
+            msp.add_circle(
+                (x_a, y_a),
+                1.0,
+                dxfattribs={
+                    'layer': 'TRANS_COTAS',
+                    'color': 1
+                }
+            )
+
             t_cota = msp.add_text(
                 f"{z_axis_val:.2f}",
-                dxfattribs={'height': h_txt * 0.8, 'layer': 'TRANS_COTAS', 'color': 1}
+                dxfattribs={
+                    'height': h_txt * 0.8,
+                    'layer': 'TRANS_COTAS',
+                    'color': 1
+                }
             )
-            t_cota.set_placement((x_a + 2, y_a + 2), align=TEA.BOTTOM_LEFT)
+
+            t_cota.set_placement(
+                (
+                    x_a + 2,
+                    y_a + 2
+                ),
+                align=TEA.BOTTOM_LEFT
+            )
 
     if progress_callback:
-        progress_callback(98, "Guardando DXF de transversales...")
+        progress_callback(
+            98,
+            "Guardando DXF de transversales..."
+        )
 
     doc.saveas(output_path)
 
     if progress_callback:
-        progress_callback(100, f"DXF de transversales guardado: {output_path}")
+        progress_callback(
+            100,
+            f"DXF de transversales guardado: {output_path}"
+        )
+

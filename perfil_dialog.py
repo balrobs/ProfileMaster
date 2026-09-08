@@ -1008,11 +1008,17 @@ class ProfileWorker(QThread):
                 output_dxf3d = os.path.join(output_dir, "perfiles_ejes3d.dxf")
                 try:
                     export_all_axes_3d_dxf(
-                        all_axes_3d, output_dxf3d,
+                        all_axes_3d,
+                        output_dxf3d,
                         equidistant_interval=eq_int,
                         sampler=eje3d_sampler,
-                            language=language,
+                        language=language,
+                        draw_cross_sections=p.get('gen_transversales', False),
+                        cross_section_spacing=p.get('trans_spacing', 0.0),
+                        cross_section_left=p.get('trans_dist_left', 0.0),
+                        cross_section_right=p.get('trans_dist_right', 0.0),
                     )
+
                 except PermissionError:
                     raise PermissionError(
                         f"No se puede escribir:\n{output_dxf3d}\nCiérralo y reintenta.")

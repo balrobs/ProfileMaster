@@ -918,7 +918,11 @@ def _equidistant_pk_points(pts_3d, interval, sampler, tol=0.05):
 def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
                            sampler=None, mark_size=_EJE3D_MARK_SIZE,
                            text_height=_EJE3D_TEXT_HEIGHT,
-                           clean_equidistant=False, language='es'):
+                           clean_equidistant=False, language='es',
+                           draw_cross_sections=False,
+                           cross_section_spacing=0.0,
+                           cross_section_left=0.0,
+                           cross_section_right=0.0):
     """
     Exporta VARIOS ejes 3D planchados a un único DXF de planta.
 
@@ -969,7 +973,14 @@ def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
     doc = ezdxf.new('R2010', setup=True)
     msp = doc.modelspace()
     _colors = [2, 1, 4, 5, 6, 3, 7]
-
+    
+    # Capa para las líneas de los perfiles transversales.
+    if draw_cross_sections:
+        cross_layer = 'QUERPROFILE'
+        if cross_layer not in doc.layers:
+            lay_cross = doc.layers.new(cross_layer)
+            lay_cross.color = 6
+    
     for idx, (nombre, pts_3d) in enumerate(axes_list):
         color = _colors[idx % len(_colors)]
         lname = f'EJE_{nombre.upper().replace(" ", "_")}'
@@ -1051,6 +1062,108 @@ def export_all_axes_3d_dxf(axes_list, output_path, equidistant_interval=0.0,
         if len(coords) >= 2:
             msp.add_polyline3d(coords, dxfattribs={'layer': lname})
 
+        # ── Perfiles transversales en el plano ───────────────────────────
+        #
+        # Los perfiles se dibujan solamente cuando la opción está activada.
+        # La posición se calcula sobre la geometría del eje mediante el PK.
+
+        if (
+            draw_cross_sections
+            and cross_section_spacing > 0
+            and len(pts_3d) >= 2
+        ):
+            total_dist = pts_3d[-1][3]
+
+            pk_val = 0.0
+
+            while pk_val <= total_dist + 1e-6:
+
+                # ── Posición del perfil sobre el eje ─────────────────────
+                x = pts_3d[0][0]
+                y = pts_3d[0][1]
+                z = pts_3d[0][2]
+
+                for i in range(1, len(pts_3d)):
+                    p0 = pts_3d[i - 1]
+                    p1 = pts_3d[i]
+
+                    d0 = p0[3]
+                    d1 = p1[3]
+
+                    if d0 <= pk_val <= d1:
+                        if abs(d1 - d0) < 1e-9:
+                            t = 0.0
+                        else:
+                            t = (pk_val - d0) / (d1 - d0)
+
+                        x = p0[0] + t * (p1[0] - p0[0])
+                        y = p0[1] + t * (p1[1] - p0[1])
+
+                        z0 = p0[2] if p0[2] is not None else 0.0
+                        z1 = p1[2] if p1[2] is not None else z0
+                        z = z0 + t * (z1 - z0)
+
+                        break
+
+                # ── Dirección perpendicular al eje ──────────────────────
+                ux, uy = _dist_tangent(pts_3d, pk_val)
+
+                lx, ly = -uy, ux
+                rx, ry = uy, -ux
+
+                x_left = x + lx * cross_section_left
+                y_left = y + ly * cross_section_left
+
+                x_right = x + rx * cross_section_right
+                y_right = y + ry * cross_section_right
+
+                # Los perfiles transversales se dibujan siempre en Z=0.
+                msp.add_line(
+                    (x_left, y_left, 0.0),
+                    (x_right, y_right, 0.0),
+                    dxfattribs={'layer': cross_layer}
+                )
+
+                pk_val += cross_section_spacing
+
+            # Se añade el perfil final si no coincide exactamente con el intervalo.
+            if total_dist > 0 and abs(
+                    (total_dist / cross_section_spacing)
+                    - round(total_dist / cross_section_spacing)) > 1e-6:
+
+                pk_val = total_dist
+
+                x = pts_3d[-1][0]
+                y = pts_3d[-1][1]
+                z = pts_3d[-1][2]
+
+                ux, uy = _dist_tangent(pts_3d, pk_val)
+
+                lx, ly = -uy, ux
+                rx, ry = uy, -ux
+
+                x_left = x + lx * cross_section_left
+                y_left = y + ly * cross_section_left
+
+                x_right = x + rx * cross_section_right
+                y_right = y + ry * cross_section_right
+
+                z_left = sampler.sample(x_left, y_left) if sampler else None
+                z_right = sampler.sample(x_right, y_right) if sampler else None
+
+                if z_left is None:
+                    z_left = z if z is not None else 0.0
+
+                if z_right is None:
+                    z_right = z if z is not None else 0.0
+
+                # Los perfiles transversales se dibujan siempre en Z=0.
+                msp.add_line(
+                    (x_left, y_left, 0.0),
+                    (x_right, y_right, 0.0),
+                    dxfattribs={'layer': cross_layer}
+                )
+    
     doc.saveas(output_path)
 
 
